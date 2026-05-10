@@ -15,21 +15,38 @@
   </header>
 
   <main class="container">
+
     <section class="card info-card">
       <h2>작동 원리</h2>
       <div class="steps">
-        <div class="step"><span class="step-num">1</span><div><strong>프레임 추출</strong><p>영상에서 다수의 프레임을 브라우저에서 직접 추출합니다.</p></div></div>
-        <div class="step"><span class="step-num">2</span><div><strong>격자 감지</strong><p>각 프레임의 모자이크 격자 위치와 크기를 자동 감지합니다.</p></div></div>
-        <div class="step"><span class="step-num">3</span><div><strong>픽셀 누적</strong><p>셀 중심 픽셀을 수집해 원본 내용을 재구성합니다.</p></div></div>
-        <div class="step"><span class="step-num">4</span><div><strong>이미지 복원</strong><p>빈 영역을 채워 완전한 이미지를 출력합니다.</p></div></div>
+        <div class="step">
+          <span class="step-num">1</span>
+          <div><strong>프레임 추출</strong><p>영상에서 다수의 프레임을 브라우저에서 직접 추출합니다.</p></div>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <div><strong>격자 감지</strong><p>각 프레임의 모자이크 격자 위치와 크기를 자동 감지합니다.</p></div>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <div><strong>픽셀 누적</strong><p>셀 중심 픽셀을 수집해 원본 내용을 재구성합니다.</p></div>
+        </div>
+        <div class="step">
+          <span class="step-num">4</span>
+          <div><strong>영상 복원</strong><p>복원된 영역을 원본 영상에 합성해 재생 가능한 WebM으로 출력합니다.</p></div>
+        </div>
       </div>
-      <p class="note"><strong>최적 조건:</strong> 모자이크 창이 <strong>움직이는</strong> 영상일수록 복원 품질이 높습니다. 서버 전송 없이 모든 처리가 브라우저 내에서 이루어집니다.</p>
+      <p class="note">
+        <strong>최적 조건:</strong> 모자이크 격자가 <strong>프레임마다 조금씩 이동</strong>하는 영상일수록 복원 품질이 높습니다.
+        서버 전송 없이 모든 처리가 브라우저 내에서 이루어집니다.
+      </p>
     </section>
 
     <section class="card upload-card" id="upload-section">
       <h2>영상 업로드</h2>
+
       <div class="drop-zone" id="drop-zone">
-        <svg class="drop-icon" viewBox="0 0 64 64" fill="none">
+        <svg class="drop-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect x="8" y="16" width="48" height="32" rx="4" stroke="currentColor" stroke-width="3"/>
           <path d="M24 28L32 20L40 28" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
           <line x1="32" y1="20" x2="32" y2="40" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
@@ -38,16 +55,19 @@
         <p class="file-types">MP4 · WebM · AVI · MOV · MKV</p>
         <input type="file" id="file-input" accept="video/*" hidden />
       </div>
+
       <div id="file-info" class="file-info hidden">
         <svg viewBox="0 0 24 24" fill="none"><path d="M15 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7l-5-5z" stroke="currentColor" stroke-width="1.5"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="1.5"/></svg>
-        <span id="file-name"></span><span id="file-size" class="muted"></span>
+        <span id="file-name"></span>
+        <span id="file-size" class="muted"></span>
         <button class="btn-icon" id="remove-file" title="제거">✕</button>
       </div>
+
       <details class="advanced">
-        <summary>고급 설정 (선택)</summary>
+        <summary>고급 설정 (선택 — 정확도 향상)</summary>
         <div class="advanced-grid">
           <div class="field-group">
-            <label>모자이크 영역 좌표 (픽셀)</label>
+            <label>모자이크 영역 좌표 (픽셀) — <em>지정하면 복원 품질이 크게 향상됩니다</em></label>
             <div class="inline-fields">
               <label>X <input type="number" id="win-x" placeholder="자동" min="0" /></label>
               <label>Y <input type="number" id="win-y" placeholder="자동" min="0" /></label>
@@ -56,7 +76,7 @@
             </div>
           </div>
           <div class="field-group">
-            <label>셀 크기 (픽셀)</label>
+            <label>셀 크기 (픽셀, 자동 감지 권장)</label>
             <div class="inline-fields">
               <label>가로 <input type="number" id="cell-w" placeholder="자동" min="2" step="0.5" /></label>
               <label>세로 <input type="number" id="cell-h" placeholder="자동" min="2" step="0.5" /></label>
@@ -64,6 +84,7 @@
           </div>
         </div>
       </details>
+
       <button class="btn btn-primary" id="process-btn" disabled>복원 시작</button>
     </section>
 
@@ -76,9 +97,11 @@
 
     <section class="card result-card hidden" id="result-section">
       <h2>복원 완료</h2>
-      <div class="result-viewer"><img id="result-img" alt="복원된 이미지" /></div>
+      <div class="result-viewer">
+        <video id="result-video" controls autoplay loop playsinline style="max-width:100%;border-radius:8px;background:#000;"></video>
+      </div>
       <div class="result-actions">
-        <button class="btn btn-primary" id="download-btn">PNG 다운로드</button>
+        <button class="btn btn-primary" id="download-btn">WebM 다운로드</button>
         <button class="btn btn-secondary" id="new-btn">새 영상 처리</button>
       </div>
     </section>
@@ -88,10 +111,11 @@
       <p id="error-msg"></p>
       <button class="btn btn-secondary" id="error-retry-btn">다시 시도</button>
     </section>
+
   </main>
 
   <footer class="footer">
-    <p>알고리즘 원본: <a href="https://github.com/KoKuToru/de-pixelate_gaV-O6NPWrI" target="_blank" rel="noopener">KoKuToru/de-pixelate_gaV-O6NPWrI</a> — CC0 1.0 &nbsp;|&nbsp; 브라우저 내 완전 처리</p>
+    <p>알고리즘 원본: <a href="https://github.com/KoKuToru/de-pixelate_gaV-O6NPWrI" target="_blank" rel="noopener">KoKuToru/de-pixelate_gaV-O6NPWrI</a> — CC0 1.0 &nbsp;|&nbsp; 브라우저 내 완전 처리 · 영상은 서버로 전송되지 않음</p>
   </footer>
 
   <script src="js/depixelate.js"></script>
