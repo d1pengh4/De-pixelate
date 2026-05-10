@@ -97,9 +97,11 @@
 
     <section class="card result-card hidden" id="result-section">
       <h2>복원 완료</h2>
-      <div class="result-viewer"><img id="result-img" alt="복원된 이미지" /></div>
+      <div class="result-viewer">
+        <video id="result-video" controls autoplay loop playsinline style="max-width:100%;border-radius:8px;background:#000;"></video>
+      </div>
       <div class="result-actions">
-        <button class="btn btn-primary" id="download-btn">PNG 다운로드</button>
+        <button class="btn btn-primary" id="download-btn">WebM 다운로드</button>
         <button class="btn btn-secondary" id="new-btn">새 영상 처리</button>
       </div>
     </section>
