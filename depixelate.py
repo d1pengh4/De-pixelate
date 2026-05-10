@@ -16,15 +16,23 @@ from scipy.ndimage import uniform_filter
 
 def extract_frames(video_path: str, output_dir: str, scene_threshold: float = 0.005) -> int:
     os.makedirs(output_dir, exist_ok=True)
+
+    # Try scene-change extraction first
     cmd = [
         "ffmpeg", "-y", "-i", video_path,
         "-filter_complex", f"select=bitor(gt(scene\\,{scene_threshold})\\,eq(n\\,0))",
         "-vsync", "drop",
         os.path.join(output_dir, "%04d.png")
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        # fallback: extract every Nth frame
+    subprocess.run(cmd, capture_output=True, text=True)
+
+    frames = glob.glob(os.path.join(output_dir, "*.png"))
+
+    # If too few frames, fall back to sampling every 3rd frame
+    if len(frames) < 10:
+        import shutil
+        shutil.rmtree(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
         cmd_fallback = [
             "ffmpeg", "-y", "-i", video_path,
             "-vf", "select=not(mod(n\\,3))",
@@ -32,7 +40,8 @@ def extract_frames(video_path: str, output_dir: str, scene_threshold: float = 0.
             os.path.join(output_dir, "%04d.png")
         ]
         subprocess.run(cmd_fallback, capture_output=True, text=True)
-    frames = glob.glob(os.path.join(output_dir, "*.png"))
+        frames = glob.glob(os.path.join(output_dir, "*.png"))
+
     return len(frames)
 
 
@@ -206,30 +215,39 @@ def process_frame(
         y += cell_h
 
 
-def fill_gaps(accumulated: np.ndarray, count: np.ndarray, max_iters: int = 500) -> np.ndarray:
+def fill_gaps(accumulated: np.ndarray, count: np.ndarray, max_iters: int = 600) -> np.ndarray:
     """
-    Fill transparent (unsampled) pixels by iteratively growing neighboring pixels.
-    Adapted from the original grow algorithm.
+    Fill unsampled pixels by iteratively spreading neighboring pixel values.
+    Matches the original PyTorch grow algorithm: empty pixels accumulate
+    the weighted average of their filled neighbors.
     """
-    image = accumulated.copy()
-    alpha = count[:, :, 3:4]  # shape [H, W, 1]
+    # Work with per-channel counts; use channel 0 count as presence mask
+    has_data = (count[:, :, :1] > 0)  # [H, W, 1]
+
+    # Pre-normalise: convert sums → mean pixel values (still in [0, 255])
+    safe_cnt = np.where(count > 0, count, 1.0)
+    image = np.where(has_data, accumulated / safe_cnt, 0.0)   # [H, W, 4]
+    alpha = has_data.astype(np.float64)                        # [H, W, 1]
 
     for _ in range(max_iters):
-        empty = (alpha == 0)
+        empty = alpha == 0
         if not np.any(empty):
             break
-        # average of 3x3 neighborhood
-        blurred = uniform_filter(image, size=[3, 3, 1], mode='reflect')
-        blurred_count = uniform_filter(alpha, size=[3, 3, 1], mode='reflect')
-        # fill empty pixels with neighbor average
-        image = np.where(empty, blurred, image)
-        alpha = np.where(empty, blurred_count, alpha)
+        # Weighted neighbourhood: only filled pixels contribute
+        weighted = image * alpha                               # zero out empty
+        neighbour_sum   = uniform_filter(weighted, size=[3, 3, 1], mode='reflect') * 9
+        neighbour_count = uniform_filter(alpha,    size=[3, 3, 1], mode='reflect') * 9
 
-    # normalize by count
-    safe_count = np.where(alpha > 0, alpha, 1)
-    result = image / safe_count * 255.0
-    result = np.clip(result, 0, 255).astype(np.uint8)
-    result[:, :, 3] = 255  # fully opaque output
+        has_neighbour = neighbour_count > 0
+        spread = np.where(has_neighbour,
+                          neighbour_sum / np.where(has_neighbour, neighbour_count, 1.0),
+                          0.0)
+        new_filled = empty & has_neighbour
+        image = np.where(new_filled, spread, image)
+        alpha = np.where(new_filled, 1.0,   alpha)
+
+    result = np.clip(image, 0, 255).astype(np.uint8)
+    result[:, :, 3] = 255  # fully opaque
     return result
 
 
