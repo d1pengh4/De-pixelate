@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>De-pixelate — 모자이크 영상 복원</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <h1>De-pixelate</h1>
+      <p class="tagline">모자이크 처리된 영상을 다중 프레임 누적으로 복원합니다</p>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- HOW IT WORKS -->
+    <section class="card info-card">
+      <h2>작동 원리</h2>
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <div>
+            <strong>프레임 추출</strong>
+            <p>영상에서 변화가 있는 프레임을 자동으로 추출합니다.</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <div>
+            <strong>격자 감지</strong>
+            <p>각 프레임에서 모자이크 격자의 위치와 크기를 감지합니다.</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <div>
+            <strong>픽셀 누적</strong>
+            <p>모자이크 셀 중심의 실제 픽셀을 수집해 누적합니다.</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-num">4</span>
+          <div>
+            <strong>이미지 복원</strong>
+            <p>빈 영역을 주변 픽셀로 채워 완전한 이미지를 출력합니다.</p>
+          </div>
+        </div>
+      </div>
+      <p class="note">
+        이 알고리즘은 <strong>움직이는 모자이크 창</strong>이 있는 영상에서 최적의 결과를 냅니다.
+        모자이크가 움직이거나 배경이 움직여 서로 다른 프레임이 원본의 다른 부분을 보여줄수록 복원 품질이 높아집니다.
+      </p>
+    </section>
+
+    <!-- UPLOAD SECTION -->
+    <section class="card upload-card" id="upload-section">
+      <h2>영상 업로드</h2>
+
+      <div class="drop-zone" id="drop-zone">
+        <svg class="drop-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="8" y="16" width="48" height="32" rx="4" stroke="currentColor" stroke-width="3"/>
+          <path d="M24 28L32 20L40 28" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <line x1="32" y1="20" x2="32" y2="40" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <p>영상을 드래그하거나 클릭하여 업로드</p>
+        <p class="file-types">MP4 · WebM · AVI · MOV · MKV (최대 500 MB)</p>
+        <input type="file" id="file-input" accept="video/mp4,video/webm,video/avi,video/quicktime,video/x-matroska,video/x-msvideo,.mkv" hidden />
+      </div>
+
+      <div id="file-info" class="file-info hidden">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M15 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7l-5-5z" stroke="currentColor" stroke-width="1.5"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span id="file-name"></span>
+        <span id="file-size" class="muted"></span>
+        <button class="btn-icon" id="remove-file" title="파일 제거">✕</button>
+      </div>
+
+      <!-- Advanced options -->
+      <details class="advanced" id="advanced-opts">
+        <summary>고급 설정</summary>
+        <div class="advanced-grid">
+          <div class="field-group">
+            <label>모자이크 영역 (자동 감지 권장)</label>
+            <div class="inline-fields">
+              <label>X <input type="number" id="win-x" placeholder="자동" min="0" /></label>
+              <label>Y <input type="number" id="win-y" placeholder="자동" min="0" /></label>
+              <label>너비 <input type="number" id="win-w" placeholder="자동" min="1" /></label>
+              <label>높이 <input type="number" id="win-h" placeholder="자동" min="1" /></label>
+            </div>
+          </div>
+          <div class="field-group">
+            <label>셀 크기 (자동 감지 권장)</label>
+            <div class="inline-fields">
+              <label>가로 <input type="number" id="cell-w" placeholder="자동" min="2" step="0.5" /></label>
+              <label>세로 <input type="number" id="cell-h" placeholder="자동" min="2" step="0.5" /></label>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <button class="btn btn-primary" id="process-btn" disabled>
+        복원 시작
+      </button>
+    </section>
+
+    <!-- PROGRESS SECTION -->
+    <section class="card progress-card hidden" id="progress-section">
+      <h2>처리 중...</h2>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+      <p class="progress-stage" id="progress-stage">대기 중...</p>
+      <p class="progress-pct" id="progress-pct">0%</p>
+    </section>
+
+    <!-- RESULT SECTION -->
+    <section class="card result-card hidden" id="result-section">
+      <h2>복원 완료</h2>
+      <div class="result-viewer">
+        <img id="result-img" alt="복원된 이미지" />
+      </div>
+      <div class="result-actions">
+        <button class="btn btn-primary" id="download-btn">PNG 다운로드</button>
+        <button class="btn btn-secondary" id="new-btn">새 영상 처리</button>
+      </div>
+    </section>
+
+    <!-- ERROR SECTION -->
+    <section class="card error-card hidden" id="error-section">
+      <h2>오류 발생</h2>
+      <p id="error-msg"></p>
+      <button class="btn btn-secondary" id="error-retry-btn">다시 시도</button>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>
+      알고리즘 원본:
+      <a href="https://github.com/KoKuToru/de-pixelate_gaV-O6NPWrI" target="_blank" rel="noopener">
+        KoKuToru/de-pixelate_gaV-O6NPWrI
+      </a>
+      — CC0 1.0
+    </p>
+  </footer>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
