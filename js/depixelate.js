@@ -1,6 +1,4 @@
 'use strict';
-// De-pixelation: multi-frame pixel accumulation
-// Based on KoKuToru/de-pixelate_gaV-O6NPWrI (CC0 1.0)
 
 const yieldToUI = () => new Promise(r => setTimeout(r, 0));
 
@@ -13,16 +11,16 @@ async function extractFrames(file, onProgress, maxFrames = 300) {
     video.onerror = () => reject(new Error('영상을 읽을 수 없습니다.'));
     video.src = URL.createObjectURL(file);
   });
-  const W = video.videoWidth, H = video.videoHeight, duration = video.duration;
-  if (!W || !H || !duration || !isFinite(duration))
+  const W = video.videoWidth, H = video.videoHeight, dur = video.duration;
+  if (!W || !H || !dur || !isFinite(dur))
     throw new Error('영상 크기 또는 길이를 알 수 없습니다.');
 
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-  const nFrames = Math.min(maxFrames, Math.max(20, Math.floor(duration * 15)));
-  const step = duration / nFrames;
+  const nFrames = Math.min(maxFrames, Math.max(20, Math.floor(dur * 15)));
+  const step = dur / nFrames;
   const frames = [];
 
   for (let i = 0; i < nFrames; i++) {
@@ -34,7 +32,8 @@ async function extractFrames(file, onProgress, maxFrames = 300) {
     if (i % 5 === 0) await yieldToUI();
   }
   URL.revokeObjectURL(video.src);
-  return { frames, W, H, duration };
+  video.src = '';
+  return { frames, W, H, duration: dur };
 }
 
 function detectCellSize(frame, wy, wx, wh, ww) {
@@ -157,6 +156,7 @@ async function fillGaps(accum, cnt, resH, resW, maxIters, onProgress) {
 
   const tmp = new Float32Array(N * 4);
   const tmpFill = new Uint8Array(N);
+
   for (let iter = 0; iter < maxIters; iter++) {
     let anyNew = false;
     tmp.set(image);
@@ -209,38 +209,35 @@ async function createOutputVideo(file, restored, wy, wx, wh, ww, W, H, onProgres
   const mimeType = ['video/webm; codecs=vp9', 'video/webm; codecs=vp8', 'video/webm']
     .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
 
-  const stream = canvas.captureStream();
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 5_000_000 });
+  const stream = canvas.captureStream(30);
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6_000_000 });
   const chunks = [];
   recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
   return new Promise((resolve, reject) => {
     recorder.onstop = () => {
       URL.revokeObjectURL(objUrl);
+      video.src = '';
       resolve(new Blob(chunks, { type: 'video/webm' }));
     };
-    video.onerror = reject;
+    video.onerror = () => reject(new Error('출력 영상 생성 실패'));
 
     video.oncanplay = () => {
       recorder.start(100);
-
-      function drawFrame() {
+      const draw = () => {
         ctx.drawImage(video, 0, 0, W, H);
         ctx.putImageData(reconData, wx, wy);
-        if (!video.ended && !video.paused) requestAnimationFrame(drawFrame);
-      }
-
+        if (!video.ended && !video.paused) requestAnimationFrame(draw);
+      };
       video.onended = () => {
         ctx.drawImage(video, 0, 0, W, H);
         ctx.putImageData(reconData, wx, wy);
         setTimeout(() => recorder.stop(), 400);
       };
-
       video.play()
-        .then(() => requestAnimationFrame(drawFrame))
+        .then(() => requestAnimationFrame(draw))
         .catch(reject);
     };
-
     video.load();
   });
 }
@@ -248,14 +245,14 @@ async function createOutputVideo(file, restored, wy, wx, wh, ww, W, H, onProgres
 async function depixelate(file, options, onProgress) {
   const { windowPos = null, windowSize = null, cellSize = null, maxFrames = 300 } = options || {};
 
-  onProgress('프레임 추출 중...', 5);
+  onProgress?.('프레임 추출 중...', 5);
   const { frames, W, H } = await extractFrames(
     file,
-    (cur, tot) => onProgress(`프레임 추출 중... (${cur}/${tot})`, 5 + Math.floor(25 * cur / tot)),
+    (cur, tot) => onProgress?.(`프레임 추출 중... (${cur}/${tot})`, 5 + Math.floor(25 * cur / tot)),
     maxFrames
   );
   if (!frames.length) throw new Error('프레임을 추출할 수 없습니다.');
-  onProgress(`${frames.length}개 프레임 추출 완료`, 30);
+  onProgress?.(`${frames.length}개 프레임 추출 완료`, 30);
   await yieldToUI();
 
   const wy = windowPos ? windowPos[0] : 0;
@@ -269,24 +266,24 @@ async function depixelate(file, options, onProgress) {
   } else {
     ({ cellH, cellW } = detectCellSize(frames[0], wy, wx, wh, ww));
   }
-  onProgress(`격자 크기: ${cellH}×${cellW}px`, 33);
+  onProgress?.(`격자 크기: ${cellH}×${cellW}px`, 33);
   await yieldToUI();
 
   const accum = new Float32Array(wh * ww * 4);
   const cnt   = new Float32Array(wh * ww);
 
   for (let i = 0; i < frames.length; i++) {
-    onProgress(`프레임 분석 중... (${i+1}/${frames.length})`, 33 + Math.floor(45 * (i+1) / frames.length));
+    onProgress?.(`프레임 분석 중... (${i+1}/${frames.length})`, 33 + Math.floor(45 * (i+1) / frames.length));
     const { mosaicY, mosaicX } = findMosaicOffset(frames[i], wy, wx, wh, ww, cellH, cellW);
     accumulateFrame(frames[i], wy, wx, wh, ww, cellH, cellW, mosaicY, mosaicX, accum, cnt);
     if (i % 5 === 0) await yieldToUI();
   }
 
-  onProgress('픽셀 복원 중...', 80);
+  onProgress?.('픽셀 복원 중...', 80);
   const maxIters = Math.ceil(Math.max(cellH, cellW)) * 2 + 10;
   const restored = await fillGaps(accum, cnt, wh, ww, maxIters, onProgress);
 
-  const videoBlob = await createOutputVideo(file, restored, wy, wx, wh, ww, W, H, onProgress);
-  onProgress('완료!', 100);
-  return videoBlob;
+  const blob = await createOutputVideo(file, restored, wy, wx, wh, ww, W, H, onProgress);
+  onProgress?.('완료!', 100);
+  return blob;
 }
