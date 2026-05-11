@@ -12,9 +12,7 @@ async function extractFrames(file, onProgress, maxFrames = 300) {
   const srcUrl = URL.createObjectURL(file);
   await new Promise((resolve, reject) => {
     video.onloadedmetadata = resolve;
-    video.onerror = () => reject(new Error(
-      '영상을 읽을 수 없습니다. MP4/WebM 형식을 지원합니다.'
-    ));
+    video.onerror = () => reject(new Error('영상을 읽을 수 없습니다. MP4/WebM 형식을 지원합니다.'));
     video.src = srcUrl;
   });
 
@@ -27,8 +25,8 @@ async function extractFrames(file, onProgress, maxFrames = 300) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
   const nFrames = Math.min(maxFrames, Math.max(20, Math.floor(dur * 15)));
-  const step    = dur / nFrames;
-  const frames  = [];
+  const step = dur / nFrames;
+  const frames = [];
 
   for (let i = 0; i < nFrames; i++) {
     video.currentTime = step * i + step * 0.05;
@@ -44,7 +42,6 @@ async function extractFrames(file, onProgress, maxFrames = 300) {
 }
 
 // ── Diff-signal computation ───────────────────────────────────────────────────
-// Row / column mean-brightness difference signals for the selected window.
 
 function computeDiffSignals(frame, wy, wx, wh, ww) {
   const { data, width: W } = frame;
@@ -76,12 +73,10 @@ function computeDiffSignals(frame, wy, wx, wh, ww) {
   return { rowDiff, colDiff };
 }
 
-// ── Period detection (improved: max-phase scoring) ────────────────────────────
-// For each candidate period p we find the phase φ that maximises the sum of
-// sig at positions φ, φ+p, φ+2p, … then normalise by the number of samples.
-// This is more robust than raw autocorrelation because:
-//   • harmonics of the true period (p/2, 2p, …) score lower after normalisation
-//   • large periods are not unfairly penalised
+// ── Period detection (max-phase scoring) ──────────────────────────────────────
+// For each candidate period p find the phase φ maximising Σ sig[φ+k*p],
+// then normalise by nObs = floor(n/p).  Harmonics score lower after
+// normalisation, and large vs small periods are treated fairly.
 
 function findPeriod(sig, minP = 4, maxP = 64) {
   const n = sig.length;
@@ -92,16 +87,15 @@ function findPeriod(sig, minP = 4, maxP = 64) {
 
   const lim = Math.min(maxP + 1, Math.floor(n / 2));
   for (let p = minP; p < lim; p++) {
-    // For each phase offset find the maximum per-sample score
     let maxPhase = 0;
     for (let phi = 0; phi < p; phi++) {
-      let s = 0, cnt = 0;
-      for (let k = phi; k < n; k += p) { s += sig[k]; cnt++; }
+      let s = 0;
+      for (let k = phi; k < n; k += p) s += sig[k];
       if (s > maxPhase) maxPhase = s;
     }
     const nObs = Math.floor(n / p);
     if (nObs < 2) continue;
-    const score = maxPhase / nObs;  // normalised per-sample score
+    const score = maxPhase / nObs;
     if (score > bestScore) { bestScore = score; best = p; }
   }
   return best;
@@ -127,13 +121,11 @@ function detectCellSizeRobust(frames, wy, wx, wh, ww) {
   }
   hArr.sort((a, b) => a - b);
   wArr.sort((a, b) => a - b);
-  const mid = i => i[Math.floor(i.length / 2)];
+  const mid = a => a[Math.floor(a.length / 2)];
   return { cellH: mid(hArr), cellW: mid(wArr) };
 }
 
-// ── Phase detection (per frame) ───────────────────────────────────────────────
-// Score every candidate phase offset and pick the one where cell-boundary
-// positions accumulate the most signal energy.
+// ── Phase detection ───────────────────────────────────────────────────────────
 
 function findMosaicOffset(frame, wy, wx, wh, ww, cellH, cellW) {
   const { rowDiff, colDiff } = computeDiffSignals(frame, wy, wx, wh, ww);
@@ -156,99 +148,213 @@ function findMosaicOffset(frame, wy, wx, wh, ww, cellH, cellW) {
 }
 
 // ── Pixel accumulation ────────────────────────────────────────────────────────
-// For this frame, the mosaic grid has boundaries at (mosaicY, mosaicX).
-// Cell centres are at mosaicY+cellH/2, mosaicY+3*cellH/2, …
-// We read the source pixel at each centre and add it to the accumulation buffer.
-// Different frames have different (mosaicY, mosaicX), so over many frames every
-// sub-cell position gets sampled at least once.
+// Start one full cell before mosaicY/mosaicX so cells that straddle the
+// window edge are not missed. The yi/xi bounds check discards out-of-range
+// centres. Multi-point sampling within each cell reduces compression noise.
 
 function accumulateFrame(frame, wy, wx, wh, ww, cellH, cellW,
                          mosaicY, mosaicX, accum, cnt) {
   const { data, width: W, height: H } = frame;
 
-  for (let y = mosaicY + cellH * 0.5; y < wh; y += cellH) {
-    for (let x = mosaicX + cellW * 0.5; x < ww; x += cellW) {
-      const yi = Math.round(y);
-      const xi = Math.round(x);
-      if (yi < 0 || yi >= wh || xi < 0 || xi >= ww) continue;
+  const startY = mosaicY - cellH; // ≤ 0 since mosaicY ∈ [0, cellH)
+  const startX = mosaicX - cellW;
 
-      const sy = wy + yi, sx = wx + xi;
-      if (sy < 0 || sy >= H || sx < 0 || sx >= W) continue;
+  const qH = Math.max(1, Math.floor(cellH / 4));
+  const qW = Math.max(1, Math.floor(cellW / 4));
+  // Sample center + 4 cardinal points (quarter-cell offset) for noise robustness
+  const offsets = [[0,0],[qH,0],[-qH,0],[0,qW],[0,-qW]];
 
-      const si = (sy * W + sx) * 4;
-      if (data[si + 3] === 0) continue;
+  for (let y0 = startY; y0 < wh; y0 += cellH) {
+    const yi = Math.round(y0 + cellH / 2);
+    if (yi < 0 || yi >= wh) continue;
+
+    for (let x0 = startX; x0 < ww; x0 += cellW) {
+      const xi = Math.round(x0 + cellW / 2);
+      if (xi < 0 || xi >= ww) continue;
+
+      let sr = 0, sg = 0, sb = 0, sc = 0;
+      for (const [dy, dx] of offsets) {
+        const sy = wy + yi + dy, sx = wx + xi + dx;
+        if (sy < 0 || sy >= H || sx < 0 || sx >= W) continue;
+        const si = (sy * W + sx) * 4;
+        if (data[si + 3] === 0) continue;
+        sr += data[si]; sg += data[si+1]; sb += data[si+2]; sc++;
+      }
+      if (sc === 0) continue;
 
       const di = (yi * ww + xi) * 4;
-      accum[di]   += data[si];
-      accum[di+1] += data[si+1];
-      accum[di+2] += data[si+2];
+      accum[di]   += sr / sc;
+      accum[di+1] += sg / sc;
+      accum[di+2] += sb / sc;
       cnt[yi * ww + xi]++;
     }
   }
 }
 
-// ── BFS gap fill ──────────────────────────────────────────────────────────────
-// Sampled pixels cover ~1/(cellH*cellW) of positions. BFS propagates colours
-// to neighbours until every pixel is filled. The iteration count is bounded
-// by the max gap size (≈ cell diameter).
+// ── Bilinear gap fill ─────────────────────────────────────────────────────────
+// Two independent 1-D linear interpolation passes (horizontal then vertical)
+// followed by a weighted combination.  This is O(N) and produces smooth,
+// grid-artefact-free results — much better than BFS nearest-neighbour.
 
-async function fillGaps(accum, cnt, resH, resW, maxIters, onProgress) {
+async function fillGapsBilinear(accum, cnt, resH, resW, onProgress) {
   const N = resH * resW;
-  const image  = new Float32Array(N * 4);
-  const filled = new Uint8Array(N);
+
+  const kr = new Float32Array(N), kg = new Float32Array(N), kb = new Float32Array(N);
+  const known = new Uint8Array(N);
 
   for (let i = 0; i < N; i++) {
     if (cnt[i] > 0) {
       const n = cnt[i];
-      image[i*4]   = accum[i*4]   / n;
-      image[i*4+1] = accum[i*4+1] / n;
-      image[i*4+2] = accum[i*4+2] / n;
-      image[i*4+3] = 255;
-      filled[i] = 1;
+      kr[i] = accum[i*4]   / n;
+      kg[i] = accum[i*4+1] / n;
+      kb[i] = accum[i*4+2] / n;
+      known[i] = 1;
     }
   }
 
-  const tmp     = new Float32Array(N * 4);
-  const tmpFill = new Uint8Array(N);
+  onProgress?.('수평 보간 중...', 82);
+  await yieldToUI();
 
-  for (let iter = 0; iter < maxIters; iter++) {
-    let anyNew = false;
-    tmp.set(image);
-    tmpFill.set(filled);
+  // ── Horizontal pass ──
+  const hr = new Float32Array(N), hg = new Float32Array(N), hb = new Float32Array(N);
+  const hw = new Float32Array(N);
 
-    for (let y = 0; y < resH; y++) {
-      for (let x = 0; x < resW; x++) {
-        const i = y * resW + x;
-        if (filled[i]) continue;
-        let r = 0, g = 0, b = 0, c = 0;
+  for (let y = 0; y < resH; y++) {
+    const base = y * resW;
+    let prevX = -1;
 
-        if (y > 0      && filled[i - resW]) { r += image[(i-resW)*4]; g += image[(i-resW)*4+1]; b += image[(i-resW)*4+2]; c++; }
-        if (y < resH-1 && filled[i + resW]) { r += image[(i+resW)*4]; g += image[(i+resW)*4+1]; b += image[(i+resW)*4+2]; c++; }
-        if (x > 0      && filled[i - 1])    { r += image[(i-1)*4];    g += image[(i-1)*4+1];    b += image[(i-1)*4+2];    c++; }
-        if (x < resW-1 && filled[i + 1])    { r += image[(i+1)*4];    g += image[(i+1)*4+1];    b += image[(i+1)*4+2];    c++; }
-
-        if (c > 0) {
-          tmp[i*4] = r/c; tmp[i*4+1] = g/c; tmp[i*4+2] = b/c; tmp[i*4+3] = 255;
-          tmpFill[i] = 1;
-          anyNew = true;
+    // Interpolate between known pixels
+    for (let x = 0; x < resW; x++) {
+      if (!known[base + x]) continue;
+      if (prevX >= 0) {
+        const span = x - prevX;
+        for (let fx = prevX + 1; fx < x; fx++) {
+          const fi = base + fx;
+          const t = (fx - prevX) / span;
+          hr[fi] = kr[base+prevX] * (1-t) + kr[base+x] * t;
+          hg[fi] = kg[base+prevX] * (1-t) + kg[base+x] * t;
+          hb[fi] = kb[base+prevX] * (1-t) + kb[base+x] * t;
+          hw[fi] = 1;
         }
       }
+      hr[base+x] = kr[base+x]; hg[base+x] = kg[base+x]; hb[base+x] = kb[base+x];
+      hw[base+x] = 4; // known pixels get higher weight in final blend
+      prevX = x;
     }
-    image.set(tmp);
-    filled.set(tmpFill);
-    if (!anyNew) break;
-    if (iter % 5 === 0) {
-      onProgress?.(`픽셀 복원 중... (${iter+1}/${maxIters})`,
-        80 + Math.min(10, Math.floor(10 * iter / maxIters)));
-      await yieldToUI();
+
+    // Extrapolate edges (copy nearest known)
+    let firstX = -1, lastX = -1;
+    for (let x = 0; x < resW; x++) if (known[base+x]) { if (firstX < 0) firstX = x; lastX = x; }
+    if (firstX > 0) {
+      for (let x = 0; x < firstX; x++) {
+        hw[base+x] = 0.5;
+        hr[base+x] = hr[base+firstX]; hg[base+x] = hg[base+firstX]; hb[base+x] = hb[base+firstX];
+      }
     }
+    if (lastX >= 0 && lastX < resW - 1) {
+      for (let x = lastX + 1; x < resW; x++) {
+        hw[base+x] = 0.5;
+        hr[base+x] = hr[base+lastX]; hg[base+x] = hg[base+lastX]; hb[base+x] = hb[base+lastX];
+      }
+    }
+  }
+
+  onProgress?.('수직 보간 중...', 86);
+  await yieldToUI();
+
+  // ── Vertical pass ──
+  const vr = new Float32Array(N), vg = new Float32Array(N), vb = new Float32Array(N);
+  const vw = new Float32Array(N);
+
+  for (let x = 0; x < resW; x++) {
+    let prevY = -1;
+
+    for (let y = 0; y < resH; y++) {
+      const i = y * resW + x;
+      if (!known[i]) continue;
+      if (prevY >= 0) {
+        const span = y - prevY;
+        for (let fy = prevY + 1; fy < y; fy++) {
+          const fi = fy * resW + x;
+          const t = (fy - prevY) / span;
+          vr[fi] = kr[prevY*resW+x] * (1-t) + kr[i] * t;
+          vg[fi] = kg[prevY*resW+x] * (1-t) + kg[i] * t;
+          vb[fi] = kb[prevY*resW+x] * (1-t) + kb[i] * t;
+          vw[fi] = 1;
+        }
+      }
+      vr[i] = kr[i]; vg[i] = kg[i]; vb[i] = kb[i]; vw[i] = 4;
+      prevY = y;
+    }
+
+    let firstY = -1, lastY = -1;
+    for (let y = 0; y < resH; y++) if (known[y*resW+x]) { if (firstY < 0) firstY = y; lastY = y; }
+    if (firstY > 0) {
+      for (let y = 0; y < firstY; y++) {
+        const fi = y*resW+x;
+        vw[fi] = 0.5; vr[fi] = vr[firstY*resW+x]; vg[fi] = vg[firstY*resW+x]; vb[fi] = vb[firstY*resW+x];
+      }
+    }
+    if (lastY >= 0 && lastY < resH - 1) {
+      for (let y = lastY + 1; y < resH; y++) {
+        const fi = y*resW+x;
+        vw[fi] = 0.5; vr[fi] = vr[lastY*resW+x]; vg[fi] = vg[lastY*resW+x]; vb[fi] = vb[lastY*resW+x];
+      }
+    }
+  }
+
+  onProgress?.('이미지 합성 중...', 89);
+  await yieldToUI();
+
+  // ── Combine H + V (weighted average) ──
+  const image = new Float32Array(N * 4);
+  for (let i = 0; i < N; i++) {
+    const wt = hw[i] + vw[i];
+    if (wt > 0) {
+      image[i*4]   = (hr[i]*hw[i] + vr[i]*vw[i]) / wt;
+      image[i*4+1] = (hg[i]*hw[i] + vg[i]*vw[i]) / wt;
+      image[i*4+2] = (hb[i]*hw[i] + vb[i]*vw[i]) / wt;
+    }
+    image[i*4+3] = 255;
   }
   return image;
 }
 
-// ── Output video via MediaRecorder ───────────────────────────────────────────
-// Plays the original video through a canvas while overlaying the restored
-// ImageData on the selected region. Records up to MAX_RECORD_SEC seconds.
+// ── Unsharp masking ───────────────────────────────────────────────────────────
+// Enhance edges lost during the averaging/interpolation step.
+
+function applyUnsharpMask(image, w, h, amount = 0.6) {
+  const N = w * h;
+  const blurred = new Float32Array(N * 4);
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sr = 0, sg = 0, sb = 0, sc = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const ny = y+dy, nx = x+dx;
+          if (ny < 0 || ny >= h || nx < 0 || nx >= w) continue;
+          const ni = (ny*w+nx)*4;
+          sr += image[ni]; sg += image[ni+1]; sb += image[ni+2]; sc++;
+        }
+      }
+      const i = (y*w+x)*4;
+      blurred[i] = sr/sc; blurred[i+1] = sg/sc; blurred[i+2] = sb/sc; blurred[i+3] = 255;
+    }
+  }
+
+  const result = new Float32Array(N * 4);
+  for (let i = 0; i < N; i++) {
+    const c = i * 4;
+    result[c]   = Math.max(0, Math.min(255, image[c]   + amount*(image[c]   - blurred[c])));
+    result[c+1] = Math.max(0, Math.min(255, image[c+1] + amount*(image[c+1] - blurred[c+1])));
+    result[c+2] = Math.max(0, Math.min(255, image[c+2] + amount*(image[c+2] - blurred[c+2])));
+    result[c+3] = 255;
+  }
+  return result;
+}
+
+// ── Output video via MediaRecorder ────────────────────────────────────────────
 
 const MAX_RECORD_SEC = 60;
 
@@ -277,9 +383,7 @@ async function createOutputVideo(file, reconData, wy, wx, W, H, duration, onProg
 
   return new Promise((resolve, reject) => {
     let stopped = false;
-    const stopOnce = () => {
-      if (!stopped) { stopped = true; recorder.stop(); }
-    };
+    const stopOnce = () => { if (!stopped) { stopped = true; recorder.stop(); } };
 
     recorder.onstop = () => {
       URL.revokeObjectURL(objUrl);
@@ -287,10 +391,7 @@ async function createOutputVideo(file, reconData, wy, wx, W, H, duration, onProg
       resolve(new Blob(chunks, { type: 'video/webm' }));
     };
 
-    video.onerror = () => {
-      stopOnce();
-      reject(new Error('출력 영상 생성 실패'));
-    };
+    video.onerror = () => { stopOnce(); reject(new Error('출력 영상 생성 실패')); };
 
     video.oncanplay = () => {
       recorder.start(100);
@@ -372,10 +473,12 @@ async function depixelate(file, options, onProgress) {
   const cnt   = new Float32Array(wh * ww);
 
   for (let i = 0; i < frames.length; i++) {
-    onProgress?.(
-      `프레임 분석 중... (${i+1}/${frames.length})`,
-      33 + Math.floor(45 * (i+1) / frames.length)
-    );
+    if (i % 10 === 0) {
+      onProgress?.(
+        `프레임 분석 중... (${i+1}/${frames.length})`,
+        33 + Math.floor(45 * (i+1) / frames.length)
+      );
+    }
     const { mosaicY, mosaicX } =
       findMosaicOffset(frames[i], wy, wx, wh, ww, cellH, cellW);
     accumulateFrame(frames[i], wy, wx, wh, ww, cellH, cellW,
@@ -383,23 +486,25 @@ async function depixelate(file, options, onProgress) {
     if (i % 5 === 0) await yieldToUI();
   }
 
-  // Check that we actually got samples
   const totalSamples = cnt.reduce((a, b) => a + (b > 0 ? 1 : 0), 0);
   if (totalSamples === 0)
     throw new Error('픽셀을 누적할 수 없습니다. 셀 크기를 수동으로 지정해 보세요.');
 
-  // 5. Fill gaps
-  onProgress?.('픽셀 복원 중...', 80);
-  const maxIters = Math.ceil(Math.max(cellH, cellW)) * 2 + 10;
-  const restored = await fillGaps(accum, cnt, wh, ww, maxIters, onProgress);
+  // 5. Bilinear gap fill (replaces BFS — smoother, no blur cascade)
+  onProgress?.('픽셀 보간 중...', 80);
+  const restored = await fillGapsBilinear(accum, cnt, wh, ww, onProgress);
 
-  // 6. Build ImageData for the restored region
+  // 6. Unsharp mask to recover edges lost during averaging
+  onProgress?.('이미지 선명화 중...', 90);
+  const sharpened = applyUnsharpMask(restored, ww, wh, 0.6);
+
+  // 7. Build final ImageData
   const reconData = new ImageData(ww, wh);
   for (let i = 0; i < wh * ww * 4; i++) {
-    reconData.data[i] = Math.max(0, Math.min(255, Math.round(restored[i])));
+    reconData.data[i] = Math.max(0, Math.min(255, Math.round(sharpened[i])));
   }
 
-  // 7. Encode output video
+  // 8. Encode output video
   const blob = await createOutputVideo(
     file, reconData, wy, wx, W, H, duration, onProgress
   );
