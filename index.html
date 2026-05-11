@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>De-pixelate — 모자이크 영상 복원</title>
+  <title>De-pixelate — 모자이크 영상 자동 복원</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <header class="hero">
     <div class="hero-inner">
       <h1>De-pixelate</h1>
-      <p class="tagline">모자이크 처리된 영상을 다중 프레임 누적으로 복원합니다 — 브라우저에서 완전 처리</p>
+      <p class="tagline">영상을 업로드하면 모자이크를 자동으로 감지하고 복원합니다 — 브라우저에서 완전 처리</p>
     </div>
   </header>
 
@@ -20,7 +20,8 @@
     <section class="card upload-card" id="upload-section">
       <h2>영상 업로드</h2>
 
-      <div class="drop-zone" id="drop-zone" role="button" tabindex="0" aria-label="영상 파일을 드롭하거나 클릭하세요">
+      <div class="drop-zone" id="drop-zone" role="button" tabindex="0"
+           aria-label="영상 파일을 드롭하거나 클릭하세요">
         <input type="file" id="file-input" accept="video/*" hidden />
         <svg class="drop-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect x="8" y="16" width="48" height="32" rx="4" stroke="currentColor" stroke-width="3"/>
@@ -31,10 +32,10 @@
         <p class="file-types">MP4 · WebM · AVI · MOV · MKV</p>
       </div>
 
-      <!-- File info row -->
       <div id="file-info" class="file-info hidden">
         <svg viewBox="0 0 24 24" fill="none">
-          <path d="M15 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7l-5-5z" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M15 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7l-5-5z"
+                stroke="currentColor" stroke-width="1.5"/>
           <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="1.5"/>
         </svg>
         <span id="file-name"></span>
@@ -42,35 +43,12 @@
         <button class="btn-icon" id="remove-file" title="파일 제거" aria-label="파일 제거">✕</button>
       </div>
 
-      <!-- Preview canvas + drag selection -->
-      <div id="preview-wrap" class="preview-wrap hidden">
-        <p class="selection-hint">▸ 복원할 모자이크 영역을 드래그하여 선택하세요</p>
-        <div class="canvas-wrap">
-          <canvas id="preview-canvas"></canvas>
-        </div>
-        <p id="selection-info" class="selection-info"></p>
-      </div>
-
-      <!-- Advanced settings -->
-      <details class="advanced">
-        <summary>고급 설정 (선택 사항)</summary>
-        <div class="advanced-grid">
-          <div class="field-group">
-            <label>셀 크기 수동 지정 (픽셀) — 자동 감지가 실패할 때만 사용</label>
-            <div class="inline-fields">
-              <label>가로 <input type="number" id="cell-w" placeholder="자동" min="2" max="128" step="1" /></label>
-              <label>세로 <input type="number" id="cell-h" placeholder="자동" min="2" max="128" step="1" /></label>
-            </div>
-          </div>
-        </div>
-      </details>
-
-      <button class="btn btn-primary" id="process-btn" disabled>복원 시작</button>
+      <button class="btn btn-primary" id="process-btn" disabled>모자이크 자동 복원</button>
     </section>
 
     <!-- PROGRESS SECTION -->
     <section class="card progress-card hidden" id="progress-section">
-      <h2>처리 중...</h2>
+      <h2>복원 중...</h2>
       <div class="progress-bar-wrap">
         <div class="progress-bar" id="progress-bar"></div>
       </div>
@@ -86,9 +64,9 @@
         <video id="result-video" controls playsinline loop></video>
       </div>
       <div class="result-actions">
-        <button class="btn btn-primary"   id="download-btn">WebM 영상 다운로드</button>
-        <button class="btn btn-accent hidden" id="img-download-btn">PNG 이미지 다운로드</button>
-        <button class="btn btn-secondary" id="new-btn">새 영상 처리</button>
+        <button class="btn btn-primary"         id="download-btn">WebM 영상 다운로드</button>
+        <button class="btn btn-accent hidden"   id="img-download-btn">PNG 이미지 다운로드</button>
+        <button class="btn btn-secondary"       id="new-btn">새 영상 처리</button>
       </div>
     </section>
 
@@ -102,7 +80,7 @@
   </main>
 
   <footer class="footer">
-    <p>알고리즘: <a href="https://github.com/KoKuToru/de-pixelate_gaV-O6NPWrI" target="_blank" rel="noopener">KoKuToru/de-pixelate</a> 기반 — CC0 1.0 &nbsp;|  모든 처리는 브라우저에서 — 영상은 서버로 전송되지 않음</p>
+    <p>알고리즘: <a href="https://github.com/KoKuToru/de-pixelate_gaV-O6NPWrI" target="_blank" rel="noopener">KoKuToru/de-pixelate</a> 기반 — CC0 1.0 &nbsp;|&nbsp; 모든 처리는 브라우저에서 — 영상은 서버로 전송되지 않음</p>
   </footer>
 
   <script src="js/depixelate.js"></script>
